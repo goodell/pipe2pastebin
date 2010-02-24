@@ -1,0 +1,187 @@
+#!/usr/bin/env perl
+#
+# Uploads files/text to codetrunk.com
+#
+# See the bottom of this file for license information (MIT License).
+#
+# Author: Dave Goodell <davidjgoodell@gmail.com>
+
+use strict;
+use warnings;
+
+use LWP::UserAgent;
+use Data::Dumper;
+use Getopt::Long;
+
+# first group is "popular" from the web page
+my @valid_formats = qw(
+js
+html
+xml
+php
+cpp
+csharp
+py
+java
+
+as3
+bash
+coldf
+css
+delphi
+diff
+erlang
+groovy
+jfx
+lua
+perl
+text
+ps
+ruby
+scala
+sql
+vb
+);
+sub list_formats {
+    print "Understood formats:\n";
+    foreach my $fmt (sort @valid_formats) {
+        printf "  $fmt\n";
+    }
+    exit;
+}
+my @known_env_vars = ();
+
+sub print_usage {
+    print <<EOT;
+Usage: $0 [OPTIONS] [FILES...]
+
+Uploads FILES to codetrunk.com.  Files will be individually uploaded if multiple
+are specified.  If no files are specified or "-" is specified, STDIN will be
+used as a file.
+
+OPTIONS:
+  --format=CONTENT_FORMAT ("text", "diff", etc)
+  --list-formats (prints the list of valid CONTENT_FORMATs and exits)
+  --expire=d/m/p
+  --name=USERNAME
+  --subdomain=SUBDOMAIN (e.g. "myproject" for "myproject.codetrunk.com")
+
+ENVIRONMENT VARIABLES:
+EOT
+    foreach my $env_var (@known_env_vars) {
+        print "  \$$env_var\n";
+    }
+    print "\n";
+    exit;
+}
+
+my $format = "text";
+my $expire = "m";
+my $name = "";
+my $subdomain = "www";
+
+# env vars supercede built-in defaults but not cmdline options
+sub get_env_default {
+    my $env_suffix = shift;
+    my $perl_var_ref = shift;
+
+    push @known_env_vars, "PIPE2PASTEBIN_$env_suffix";
+    if (exists $ENV{"PIPE2PASTEBIN_$env_suffix"}) {
+        $$perl_var_ref = $ENV{"PIPE2PASTEBIN_$env_suffix"};
+    }
+}
+get_env_default("FORMAT", \$format);
+get_env_default("EXPIRE", \$expire);
+get_env_default("NAME", \$name);
+get_env_default("SUBDOMAIN", \$subdomain);
+
+GetOptions(
+    "format|type|kind|language=s" => \$format,
+    "expires=s"     => \$expire,
+    "name|user=s"   => \$name,
+    "subdomain=s"   => \$subdomain,
+    "list-formats!" => \&list_formats,
+    "help!"         => \&print_usage,
+) or die "unable to parse options, stopped";
+
+# validate options
+unless (grep {$_ eq $format} @valid_formats)  {
+    die "invalid format='$format', stopped";
+}
+unless ($expire =~ m/^d|m|p$/) {
+    die "invalid expire=$expire, stopped";
+}
+
+my $url = "http://$subdomain.codetrunk.com/submitTrunk";
+my $ua = LWP::UserAgent->new();
+
+my @files = ();
+if (@ARGV) {
+    @files = (@ARGV);
+}
+else {
+    @files = ("-");
+}
+
+foreach my $file (@files) {
+    my $content = '';
+    local $/; # localized slurp mode
+    if ($file eq "-")  {
+        $content = <STDIN>;
+    }
+    else {
+        open FILE, "<", $file;
+        $content = <FILE>;
+        close FILE;
+    }
+    post_content($content);
+}
+
+sub post_content {
+    my $content = shift;
+
+    my $form_fields = {};
+
+    # 'Conroller' really is right, the codetrunk.com guy must have just misspelled it.
+    $form_fields->{'Conroller'} = "submitTrunk";
+
+    $form_fields->{'ctPKey'} = "0"; # what is this? parent post key?
+    $form_fields->{'ctSyntaxLanguage'} = $format;
+    $form_fields->{'ctName'} = $name;
+    $form_fields->{'ctExpiry'} = $expire; # d/m/f --> day/month/forever
+    $form_fields->{'ctRemember'} = "true";  # shouldn't matter...
+
+    $form_fields->{'ctTrunk'} = $content;
+
+    my $response = $ua->post($url, $form_fields);
+    unless ($response->code() == 302) {
+        die "unexpected response=".$response->code()." from server, stopped";
+    }
+    my $location_header = $response->header("Location");
+    print "$location_header\n";
+    #print Dumper(\$response);
+}
+
+
+# Copyright (c) 2010 Dave Goodell
+#
+# Permission is hereby granted, free of charge, to any person
+# obtaining a copy of this software and associated documentation
+# files (the "Software"), to deal in the Software without
+# restriction, including without limitation the rights to use,
+# copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following
+# conditions:
+#
+# The above copyright notice and this permission notice shall be
+# included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+# HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+# WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+# OTHER DEALINGS IN THE SOFTWARE.
